@@ -1,6 +1,6 @@
 /**
  * MIRAKURU-VERSE Web Edition
- * PeerJS WebRTC P2P + AES-256-GCM E2E暗号化
+ * MQTT + NaCl E2E暗号化
  * 第三者による監視が不可能なセキュアメタバース
  */
 
@@ -112,6 +112,48 @@ class SecurityModule {
         }
     }
 }
+
+const MQTT_CONFIG = {
+    brokerUrl: 'wss://broker.emqx.io:8084/mqtt',
+    topicPrefix: 'mirakuruverse/private/',
+    minSendInterval: 50,
+};
+
+const CryptoBox = {
+    deriveKey(roomId) {
+        const hash = nacl.hash(nacl.util.decodeUTF8(roomId));
+        return hash.slice(0, 32);
+    },
+    makeNonce(senderId, counter) {
+        const seed = `${senderId}:${counter}`;
+        const hash = nacl.hash(nacl.util.decodeUTF8(seed));
+        return hash.slice(0, 24);
+    },
+    encrypt(key, senderId, counter, payload) {
+        const nonce = this.makeNonce(senderId, counter);
+        const message = nacl.util.decodeUTF8(JSON.stringify(payload));
+        const boxed = nacl.secretbox(message, nonce, key);
+        return {
+            v: 1,
+            sender: senderId,
+            counter,
+            payload: nacl.util.encodeBase64(boxed),
+        };
+    },
+    decrypt(key, envelope) {
+        if (!envelope || envelope.v !== 1) return null;
+        if (!envelope.sender || typeof envelope.counter !== 'number' || !envelope.payload) return null;
+        const nonce = this.makeNonce(envelope.sender, envelope.counter);
+        const boxed = nacl.util.decodeBase64(envelope.payload);
+        const opened = nacl.secretbox.open(boxed, nonce, key);
+        if (!opened) return null;
+        try {
+            return JSON.parse(nacl.util.encodeUTF8(opened));
+        } catch (e) {
+            return null;
+        }
+    },
+};
 
 // ===== URLパラメータ解析 =====
 function parseInviteFromUrl() {
@@ -296,300 +338,206 @@ class TreasureSystem {
     }
 }
 
-// ===== SecureNetworkManager (PeerJS + E2E) =====
+// ===== SecureNetworkManager (MQTT + E2E) =====
 class SecureNetworkManager {
     constructor(world) {
         this.world = world;
-        this.peer = null;
-        this.connections = new Map(); // peerId -> DataConnection
-        this.encryptionKey = null;
+        this.client = null;
         this.roomId = null;
-        this.myPeerId = null;
-        this.hostPeerId = null;
+        this.myId = null;
         this.nickname = '';
         this.isHost = false;
+        this.encryptionKey = null;
+        this.messageCounter = 0;
+        this.receivedCounters = new Map();
         this.lastSent = 0;
-        this.hostRetryTimer = null;
-        this.hostConnectRetries = 0;
-        this.hostConnected = false;
+        this.lastAnnounce = 0;
+        this.isConnected = false;
     }
 
     /**
      * セキュアなルームIDを生成
      */
     generateRoomId() {
-        return SecurityModule.generateSecureId(64);
+        const bytes = new Uint8Array(32);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes)
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
     }
 
     /**
      * ルームを設定（ホストまたは参加者）
      */
-    async setRoom(roomId, isHost = false, hostPeerId = '') {
+    async setRoom(roomId, isHost = false, _hostPeerId = '') {
         this.roomId = roomId;
         this.isHost = isHost;
+        this.myId = 'mv_' + SecurityModule.generateSecureId(16);
+        this.encryptionKey = CryptoBox.deriveKey(roomId);
+        this.messageCounter = 0;
+        this.receivedCounters.clear();
+    }
 
-        // ルームIDから暗号化キーを導出
-        this.encryptionKey = await SecurityModule.deriveKey(roomId);
-        console.log('Encryption key derived from room ID');
-
-        // PeerJS ID = ルームIDのハッシュ（ホストのみ予測可能なID）
-        if (isHost) {
-            // ホストは固定ID（参加者が接続するため）
-            this.myPeerId = 'mv_' + roomId.slice(0, 16);
-            this.hostPeerId = this.myPeerId;
-        } else {
-            // 参加者はランダムID
-            this.myPeerId = 'mv_' + SecurityModule.generateSecureId(16);
-            this.hostPeerId = hostPeerId || ('mv_' + roomId.slice(0, 16));
-        }
+    getTopic() {
+        return `${MQTT_CONFIG.topicPrefix}${this.roomId}`;
     }
 
     /**
-     * PeerJS接続を開始（タイムアウト付き）
+     * MQTT接続を開始（タイムアウト付き）
      */
     async connect(nickname) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             this.nickname = nickname;
-            this.hostConnected = false;
-            this.hostConnectRetries = 0;
-            if (this.hostRetryTimer) {
-                clearTimeout(this.hostRetryTimer);
-                this.hostRetryTimer = null;
+            if (!this.myId) {
+                this.myId = 'mv_' + SecurityModule.generateSecureId(16);
             }
 
-            // 10秒タイムアウト
+            let resolved = false;
+            const finish = () => {
+                if (resolved) return;
+                resolved = true;
+                resolve();
+            };
+
             const timeout = setTimeout(() => {
-                console.warn('PeerJS connection timeout - proceeding offline');
-                resolve(); // タイムアウトでも続行
+                console.warn('MQTT connection timeout - proceeding offline');
+                finish();
             }, 10000);
 
             try {
-                console.log('Creating PeerJS with ID:', this.myPeerId);
-                this.peer = new Peer(this.myPeerId, {
-                    debug: 2 // デバッグログ有効
+                this.client = mqtt.connect(MQTT_CONFIG.brokerUrl, {
+                    clientId: this.myId,
+                    clean: true,
+                    connectTimeout: 10000,
+                    reconnectPeriod: 1000,
                 });
 
-                this.peer.on('open', (id) => {
+                this.client.on('connect', () => {
                     clearTimeout(timeout);
-                    console.log('PeerJS connected with ID:', id);
-                    this.myPeerId = id;
-                    if (this.isHost) {
-                        this.hostPeerId = id;
-                    }
-
-                    if (this.isHost) {
-                        console.log('Waiting for connections as host...');
-                    } else {
-                        this.connectToHost();
-                    }
-
-                    resolve();
+                    this.isConnected = true;
+                    const topic = this.getTopic();
+                    this.client.subscribe(topic, (err) => {
+                        if (err) {
+                            console.error('Subscribe error:', err);
+                        }
+                        this.sendJoin();
+                        finish();
+                    });
                 });
 
-                this.peer.on('connection', (conn) => {
-                    this.handleIncomingConnection(conn, nickname);
+                this.client.on('message', (_topic, message) => {
+                    this.handleMessage(message.toString());
                 });
 
-                this.peer.on('error', (err) => {
-                    console.error('PeerJS error:', err);
-                    clearTimeout(timeout);
-
-                    if (err.type === 'unavailable-id') {
-                        // IDが既に使用中 - リトライ
-                        console.log('Peer ID already in use, retrying...');
-                        this.myPeerId = 'mv_' + SecurityModule.generateSecureId(16);
-                        this.peer.destroy();
-                        this.connect(nickname).then(resolve).catch(reject);
-                        return;
-                    }
-
-                    if (err.type === 'peer-unavailable') {
-                        this.scheduleHostRetry('peer-unavailable');
-                    }
-
-                    // エラーでも続行（オフラインモード）
-                    resolve();
+                this.client.on('error', (err) => {
+                    console.error('MQTT error:', err);
+                    finish();
                 });
 
-                this.peer.on('disconnected', () => {
-                    console.log('PeerJS disconnected from server');
+                this.client.on('close', () => {
+                    this.isConnected = false;
                 });
-
             } catch (e) {
                 clearTimeout(timeout);
-                console.error('PeerJS initialization failed:', e);
-                resolve(); // エラーでも続行
+                console.error('MQTT initialization failed:', e);
+                finish();
             }
         });
     }
 
-    /**
-     * 特定のピアに接続
-     */
-    connectToHost() {
-        if (this.isHost || !this.peer || !this.hostPeerId) return;
-        if (this.hostConnected || this.connections.has(this.hostPeerId)) return;
-        this.connectToPeer(this.hostPeerId, this.nickname, { isHostConnection: true, retryOnFail: true });
-    }
-
-    scheduleHostRetry(reason = 'retry') {
-        if (this.isHost || this.hostConnected || !this.peer || !this.hostPeerId) return;
-        if (this.hostRetryTimer) return;
-
-        const attempt = this.hostConnectRetries;
-        const delay = Math.min(8000, 800 + attempt * 700);
-        if (attempt === 0) {
-            if (this.world.myAvatar) {
-                this.world.systemSay('ホストに接続中...');
-            }
-        }
-        this.hostConnectRetries += 1;
-
-        this.hostRetryTimer = setTimeout(() => {
-            this.hostRetryTimer = null;
-            console.log(`Retrying host connection (${reason})...`);
-            this.connectToHost();
-        }, delay);
-    }
-
-    connectToPeer(peerId, nickname, options = {}) {
-        if (!this.peer) return;
-        if (this.connections.has(peerId)) return;
-
-        const { isHostConnection = false, retryOnFail = false } = options;
-        console.log('Connecting to peer:', peerId);
-        const conn = this.peer.connect(peerId, { reliable: true });
-        let opened = false;
-
-        conn.on('open', async () => {
-            opened = true;
-            console.log('Connected to:', peerId);
-            this.connections.set(peerId, conn);
-            if (isHostConnection) {
-                this.hostConnected = true;
-                this.hostConnectRetries = 0;
-                if (this.hostRetryTimer) {
-                    clearTimeout(this.hostRetryTimer);
-                    this.hostRetryTimer = null;
-                }
-            }
-
-            // 参加メッセージを送信
-            await this.sendTo(conn, {
-                type: 'join',
-                name: nickname,
-                colorIdx: this.world.myColorIdx
-            });
-        });
-
-        conn.on('data', async (data) => {
-            await this.handleEncryptedMessage(data, peerId);
-        });
-
-        conn.on('error', (err) => {
-            console.warn('Peer connection error:', err);
-            if (retryOnFail && !opened) {
-                this.scheduleHostRetry(err?.type || 'error');
-            }
-        });
-
-        conn.on('close', () => {
-            console.log('Connection closed:', peerId);
-            this.connections.delete(peerId);
-            this.world.removeRemotePlayer(peerId);
-            if (isHostConnection) {
-                this.hostConnected = false;
-                if (retryOnFail) {
-                    this.scheduleHostRetry('close');
-                }
-            }
-        });
-    }
-
-    /**
-     * 着信接続を処理
-     */
-    handleIncomingConnection(conn, nickname) {
-        console.log('Incoming connection from:', conn.peer);
-
-        conn.on('open', async () => {
-            this.connections.set(conn.peer, conn);
-
-            // ホストは参加者に自分の情報を送信
-            await this.sendTo(conn, {
-                type: 'join',
-                name: nickname,
-                colorIdx: this.world.myColorIdx
-            });
-        });
-
-        conn.on('data', async (data) => {
-            await this.handleEncryptedMessage(data, conn.peer);
-        });
-
-        conn.on('close', () => {
-            console.log('Connection closed:', conn.peer);
-            this.connections.delete(conn.peer);
-            this.world.removeRemotePlayer(conn.peer);
-        });
-    }
-
-    /**
-     * 暗号化メッセージを処理
-     */
-    async handleEncryptedMessage(encryptedData, fromPeerId) {
-        const data = await SecurityModule.decrypt(this.encryptionKey, encryptedData);
-        if (!data) {
-            console.warn('Failed to decrypt message from:', fromPeerId);
+    handleMessage(rawMessage) {
+        if (!this.encryptionKey) return;
+        let envelope = null;
+        try {
+            envelope = JSON.parse(rawMessage);
+        } catch (e) {
+            console.error('Message parse error:', e);
             return;
         }
+        const data = CryptoBox.decrypt(this.encryptionKey, envelope);
+        if (!data || !data.id || data.id !== envelope.sender) return;
+        if (this.isReplay(envelope.sender, envelope.counter)) return;
+        if (data.id === this.myId) return;
+        this.handlePayload(data);
+    }
 
+    handlePayload(data) {
         switch (data.type) {
             case 'join':
-                this.world.addRemotePlayer(fromPeerId, data.name, data.colorIdx);
+                this.world.addRemotePlayer(data.id, data.name, data.colorIdx);
+                this.announcePresence();
                 break;
             case 'leave':
-                this.world.removeRemotePlayer(fromPeerId);
+                this.world.removeRemotePlayer(data.id);
                 break;
             case 'move':
-                this.world.updateRemotePlayer(fromPeerId, data);
+                this.world.addRemotePlayer(data.id, data.name, data.colorIdx);
+                this.world.updateRemotePlayer(data.id, data);
                 break;
             case 'chat':
-                this.world.showRemoteBubble(fromPeerId, data.text, 'normal');
+                this.world.showRemoteBubble(data.id, data.text, 'normal');
                 break;
+            case 'reaction':
             case 'react':
-                this.world.showRemoteBubble(fromPeerId, data.symbol, 'symbol');
+                this.world.showRemoteBubble(data.id, data.symbol, 'symbol');
                 break;
             case 'emote':
-                this.world.playRemoteEmote(fromPeerId, data.emote);
+                this.world.playRemoteEmote(data.id, data.emote);
                 break;
-            case 'magic':
-                this.world.magicSystem.applyConfig(data.config);
+            case 'magic': {
+                const config = data.config || {};
+                const magicType = data.magicType || config.type || 'snow';
+                this.world.magicSystem.applyConfig({
+                    type: magicType,
+                    count: data.count ?? config.count,
+                    color: data.color ?? config.color,
+                    speed: data.speed ?? config.speed,
+                    size: data.size ?? config.size,
+                });
                 break;
-        }
-    }
-
-    /**
-     * 特定のピアに暗号化メッセージを送信
-     */
-    async sendTo(conn, data) {
-        if (!this.encryptionKey) return;
-        const encrypted = await SecurityModule.encrypt(this.encryptionKey, data);
-        conn.send(encrypted);
-    }
-
-    /**
-     * 全ピアにブロードキャスト
-     */
-    async broadcast(data) {
-        if (!this.encryptionKey) return;
-        const encrypted = await SecurityModule.encrypt(this.encryptionKey, data);
-
-        for (const conn of this.connections.values()) {
-            if (conn.open) {
-                conn.send(encrypted);
             }
         }
+    }
+
+    announcePresence(force = false) {
+        const now = Date.now();
+        if (!force && now - this.lastAnnounce < 1000) return;
+        this.lastAnnounce = now;
+        this.sendJoin();
+    }
+
+    isReplay(sender, counter) {
+        const last = this.receivedCounters.get(sender);
+        if (last !== undefined && counter <= last) return true;
+        this.receivedCounters.set(sender, counter);
+        return false;
+    }
+
+    send(data) {
+        if (!this.client || !this.roomId || !this.encryptionKey || !this.isConnected) return;
+        const payload = {
+            ...data,
+            id: this.myId,
+            name: this.nickname,
+        };
+        this.messageCounter += 1;
+        const envelope = CryptoBox.encrypt(this.encryptionKey, this.myId, this.messageCounter, payload);
+        this.client.publish(this.getTopic(), JSON.stringify(envelope));
+    }
+
+    sendJoin() {
+        this.send({ type: 'join', colorIdx: this.world.myColorIdx });
+    }
+
+    sendLeave() {
+        this.send({ type: 'leave' });
+    }
+
+    /**
+     * 全体ブロードキャスト
+     */
+    async broadcast(data) {
+        this.send(data);
     }
 
     /**
@@ -597,14 +545,15 @@ class SecureNetworkManager {
      */
     async broadcastMove() {
         const now = Date.now();
-        if (now - this.lastSent < 50) return;
+        if (now - this.lastSent < MQTT_CONFIG.minSendInterval) return;
         this.lastSent = now;
 
         const p = this.world.myAvatar.position;
-        await this.broadcast({
+        this.send({
             type: 'move',
             x: p.x, y: p.y, z: p.z,
-            ry: this.world.myAvatar.rotation.y
+            ry: this.world.myAvatar.rotation.y,
+            colorIdx: this.world.myColorIdx,
         });
     }
 
@@ -612,34 +561,25 @@ class SecureNetworkManager {
      * 切断
      */
     disconnect() {
-        this.broadcast({ type: 'leave' });
+        this.sendLeave();
 
-        for (const conn of this.connections.values()) {
-            conn.close();
+        if (this.client) {
+            this.client.end();
+            this.client = null;
         }
-        this.connections.clear();
-
-        if (this.hostRetryTimer) {
-            clearTimeout(this.hostRetryTimer);
-            this.hostRetryTimer = null;
-        }
-        this.hostConnected = false;
-        this.hostConnectRetries = 0;
+        this.isConnected = false;
+        this.encryptionKey = null;
+        this.receivedCounters.clear();
         this.nickname = '';
-
-        if (this.peer) {
-            this.peer.destroy();
-            this.peer = null;
-        }
     }
 
     /**
      * 招待URL生成
      */
     generateInviteUrl() {
-        const baseUrl = window.location.origin + window.location.pathname;
+        const baseUrl = window.location.href.split('?')[0];
         const expires = Date.now() + 24 * 60 * 60 * 1000; // 24時間
-        const hostId = this.peer?.id || this.myPeerId;
+        const hostId = this.myId || '';
         return `${baseUrl}?room=${this.roomId}&expires=${expires}&host=${hostId}`;
     }
 }
@@ -955,7 +895,7 @@ class MirakuruVerse {
         document.querySelectorAll('.reaction-btn').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const symbol = btn.dataset.reaction;
-                await this.network.broadcast({ type: 'react', symbol });
+                await this.network.broadcast({ type: 'reaction', symbol });
                 this.showBubble(this.myAvatar, symbol, 'symbol');
             });
         });
@@ -1039,7 +979,7 @@ class MirakuruVerse {
                 return `sent: "${text}"`;
             case 'react':
                 const symbol = args[0] || '👍';
-                await this.network.broadcast({ type: 'react', symbol });
+                await this.network.broadcast({ type: 'reaction', symbol });
                 this.showBubble(this.myAvatar, symbol, 'symbol');
                 return `reacted: ${symbol}`;
             case 'emote':
@@ -1053,7 +993,12 @@ class MirakuruVerse {
                 if (args[2]) config.color = args[2];
                 if (args[3]) config.speed = parseFloat(args[3]);
                 this.magicSystem.applyConfig(config);
-                await this.network.broadcast({ type: 'magic', config });
+                const magicPayload = { type: 'magic', magicType: config.type };
+                if (config.count) magicPayload.count = config.count;
+                if (config.color) magicPayload.color = config.color;
+                if (config.speed) magicPayload.speed = config.speed;
+                if (config.size) magicPayload.size = config.size;
+                await this.network.broadcast(magicPayload);
                 return `magic: ${config.type}`;
             case 'treasure_hint':
                 const hint = this.treasureSystem.hint(true);
@@ -1264,8 +1209,12 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Three.js not loaded - cannot initialize MirakuruVerse');
         return;
     }
-    if (typeof Peer === 'undefined') {
-        console.error('PeerJS not loaded - cannot initialize MirakuruVerse');
+    if (typeof mqtt === 'undefined') {
+        console.error('MQTT not loaded - cannot initialize MirakuruVerse');
+        return;
+    }
+    if (typeof nacl === 'undefined' || !nacl.util) {
+        console.error('NaCl not loaded - cannot initialize MirakuruVerse');
         return;
     }
 

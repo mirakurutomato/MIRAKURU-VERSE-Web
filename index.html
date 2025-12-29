@@ -25,8 +25,12 @@
     <!-- Three.js (Local) -->
     <script src="vendor/three.min.js" onerror="window.__threeLoadFailed = true;"></script>
 
-    <!-- PeerJS for WebRTC P2P (Local) -->
-    <script src="vendor/peerjs.min.js" onerror="window.__peerLoadFailed = true;"></script>
+    <!-- MQTT (Local) -->
+    <script src="vendor/mqtt.min.js" onerror="window.__mqttLoadFailed = true;"></script>
+
+    <!-- NaCl (Local) -->
+    <script src="vendor/tweetnacl.min.js" onerror="window.__naclLoadFailed = true;"></script>
+    <script src="vendor/tweetnacl-util.min.js" onerror="window.__naclUtilLoadFailed = true;"></script>
 
     <link rel="stylesheet" href="style.css">
 
@@ -40,9 +44,17 @@
                 hasError = true;
                 errorMsg += '• Three.js のロードに失敗しました\n';
             }
-            if (typeof Peer === 'undefined' || window.__peerLoadFailed) {
+            if (typeof mqtt === 'undefined' || window.__mqttLoadFailed) {
                 hasError = true;
-                errorMsg += '• PeerJS のロードに失敗しました\n';
+                errorMsg += '• MQTT のロードに失敗しました\n';
+            }
+            if (typeof nacl === 'undefined' || window.__naclLoadFailed) {
+                hasError = true;
+                errorMsg += '• NaCl のロードに失敗しました\n';
+            }
+            if (!window.nacl || !window.nacl.util || window.__naclUtilLoadFailed) {
+                hasError = true;
+                errorMsg += '• NaCl ユーティリティのロードに失敗しました\n';
             }
 
             if (hasError) {
@@ -54,11 +66,11 @@
                     '<h2 style="margin-bottom: 1rem; font-size: 1.5rem;">⚠️ ライブラリ読み込みエラー</h2>' +
                     '<p style="margin-bottom: 1rem; font-size: 0.9rem; white-space: pre-line;">' + errorMsg + '</p>' +
                     '<p style="font-size: 0.85rem; color: rgba(255,255,255,0.9); margin-bottom: 1.5rem;">' +
-                    '必要なライブラリが読み込めません。<br>vendor フォルダに Three.js と PeerJS があるか確認してください。' +
+                    '必要なライブラリが読み込めません。<br>vendor フォルダに Three.js / MQTT / NaCl があるか確認してください。' +
                     '</p>' +
                     '<div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; font-family: monospace; font-size: 0.8rem; text-align: left;">' +
                     '<p style="margin-bottom: 0.5rem; color: rgba(255,255,255,0.7);">フォルダ構成:</p>' +
-                    '<code style="color: #76ff03;">MIRAKURU-VERSE-Web/<br>  index.html<br>  main.js<br>  vendor/three.min.js<br>  vendor/peerjs.min.js</code>' +
+                    '<code style="color: #76ff03;">MIRAKURU-VERSE-Web/<br>  index.html<br>  main.js<br>  vendor/three.min.js<br>  vendor/mqtt.min.js<br>  vendor/tweetnacl.min.js<br>  vendor/tweetnacl-util.min.js</code>' +
                     '</div>' +
                     '</div>';
                 overlay.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,96,100,0.98); z-index: 9999; padding: 1rem;';
