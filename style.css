@@ -69,9 +69,16 @@ body {
 }
 
 .logo-icon {
-    font-size: 4rem;
-    display: block;
-    margin-bottom: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.75rem;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.logo-icon svg {
+    width: 64px;
+    height: 64px;
 }
 
 .logo-text {
@@ -135,7 +142,15 @@ body {
 }
 
 .security-icon {
-    font-size: 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+}
+
+.security-icon svg {
+    width: 16px;
+    height: 16px;
 }
 
 .btn-primary {
@@ -199,6 +214,21 @@ body {
 .room-badge {
     color: var(--accent);
     font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.badge-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+}
+
+.badge-icon svg {
+    width: 14px;
+    height: 14px;
 }
 
 .room-id {
@@ -285,8 +315,18 @@ body {
     border-radius: var(--radius-sm);
     background: rgba(255, 255, 255, 0.9);
     font-size: 1rem;
+    color: var(--primary-dark);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     transition: all 0.2s;
+}
+
+.btn-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
 }
 
 .btn-icon:hover {
@@ -488,6 +528,10 @@ body {
 .python-title {
     font-weight: 700;
     letter-spacing: 1px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--primary-dark);
 }
 
 .python-content {

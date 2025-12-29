@@ -116,7 +116,7 @@ class SecurityModule {
 const MQTT_CONFIG = {
     brokerUrl: 'wss://broker.emqx.io:8084/mqtt',
     topicPrefix: 'mirakuruverse/private/',
-    minSendInterval: 50,
+    minSendInterval: 30,
 };
 
 const CryptoBox = {
@@ -613,6 +613,7 @@ class MirakuruVerse {
             pythonClose: document.getElementById('python-close'),
             pythonCode: document.getElementById('python-code'),
             pythonRun: document.getElementById('python-run'),
+            pythonHelp: document.getElementById('python-help'),
             pythonClear: document.getElementById('python-clear'),
             pythonOutput: document.getElementById('python-output'),
             exitBtn: document.getElementById('btn-exit'),
@@ -878,6 +879,7 @@ class MirakuruVerse {
     }
 
     setupChat() {
+        if (!this.ui.chatInput || !this.ui.chatSend) return;
         const sendChat = async () => {
             const text = this.ui.chatInput.value.trim();
             if (!text) return;
@@ -925,6 +927,12 @@ class MirakuruVerse {
             const code = this.ui.pythonCode.value;
             this.executePythonCode(code);
         });
+
+        if (this.ui.pythonHelp) {
+            this.ui.pythonHelp.addEventListener('click', () => {
+                this.executePythonCode('help()');
+            });
+        }
     }
 
     setupHint() {
@@ -1014,7 +1022,16 @@ class MirakuruVerse {
                 const p = this.myAvatar?.position;
                 return p ? `position: (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})` : 'not ready';
             case 'help':
-                return 'say, react, emote, magic, treasure_hint, invite, status';
+                return [
+                    'say("text")      # チャット',
+                    'react("👍")      # リアクション',
+                    'emote("wave")    # エモート',
+                    'magic("snow")    # 魔法エフェクト',
+                    'treasure_hint()  # 宝探しヒント',
+                    'treasure_reset() # 宝箱リセット',
+                    'invite()         # 招待URLをコピー',
+                    'status()         # 位置情報'
+                ].join('\n');
             default:
                 return `Unknown: ${func}`;
         }
@@ -1072,7 +1089,7 @@ class MirakuruVerse {
     updateRemotePlayer(key, data) {
         const player = this.remotePlayers[key];
         if (player) {
-            player.mesh.position.lerp(new THREE.Vector3(data.x, data.y, data.z), 0.1);
+            player.mesh.position.lerp(new THREE.Vector3(data.x, data.y, data.z), 0.2);
             player.mesh.rotation.y = data.ry;
         }
     }
@@ -1152,7 +1169,7 @@ class MirakuruVerse {
             if (this.keys['q'] || this.keys['space']) targetVertical += 1;
             if (this.keys['e'] || this.keys['shift']) targetVertical -= 1;
 
-            const smooth = 0.18;
+            const smooth = 0.25;
             this.move.forward += (targetForward - this.move.forward) * smooth;
             this.move.turn += (targetTurn - this.move.turn) * smooth;
             this.move.vertical += (targetVertical - this.move.vertical) * smooth;
