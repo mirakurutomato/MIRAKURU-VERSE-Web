@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="MIRAKURU-VERSE - 次世代ソーシャルメタバース。友達と3D空間で繋がり、Pythonで魔法を作り出そう。">
+    <meta name="theme-color" content="#006064">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- OGP -->
+    <meta property="og:title" content="MIRAKURU-VERSE | ソーシャルメタバース">
+    <meta property="og:description" content="友達と3D空間で繋がり、Pythonで魔法を作り出そう。">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://mirakurutomato.github.io/MIRAKURU-VERSE-Web/">
+
+    <title>MIRAKURU-VERSE</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Three.js (Local) -->
+    <script src="vendor/three.min.js" onerror="window.__threeLoadFailed = true;"></script>
+
+    <!-- PeerJS for WebRTC P2P (Local) -->
+    <script src="vendor/peerjs.min.js" onerror="window.__peerLoadFailed = true;"></script>
+
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Library Load Check -->
+    <script>
+        window.addEventListener('DOMContentLoaded', function () {
+            var hasError = false;
+            var errorMsg = '';
+
+            if (typeof THREE === 'undefined' || window.__threeLoadFailed) {
+                hasError = true;
+                errorMsg += '• Three.js のロードに失敗しました\n';
+            }
+            if (typeof Peer === 'undefined' || window.__peerLoadFailed) {
+                hasError = true;
+                errorMsg += '• PeerJS のロードに失敗しました\n';
+            }
+
+            if (hasError) {
+                // Create error overlay
+                var overlay = document.createElement('div');
+                overlay.id = 'library-error';
+                overlay.innerHTML =
+                    '<div style="background: rgba(255,64,129,0.95); color: white; padding: 2rem; border-radius: 16px; max-width: 480px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">' +
+                    '<h2 style="margin-bottom: 1rem; font-size: 1.5rem;">⚠️ ライブラリ読み込みエラー</h2>' +
+                    '<p style="margin-bottom: 1rem; font-size: 0.9rem; white-space: pre-line;">' + errorMsg + '</p>' +
+                    '<p style="font-size: 0.85rem; color: rgba(255,255,255,0.9); margin-bottom: 1.5rem;">' +
+                    '必要なライブラリが読み込めません。<br>vendor フォルダに Three.js と PeerJS があるか確認してください。' +
+                    '</p>' +
+                    '<div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; font-family: monospace; font-size: 0.8rem; text-align: left;">' +
+                    '<p style="margin-bottom: 0.5rem; color: rgba(255,255,255,0.7);">フォルダ構成:</p>' +
+                    '<code style="color: #76ff03;">MIRAKURU-VERSE-Web/<br>  index.html<br>  main.js<br>  vendor/three.min.js<br>  vendor/peerjs.min.js</code>' +
+                    '</div>' +
+                    '</div>';
+                overlay.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,96,100,0.98); z-index: 9999; padding: 1rem;';
+                document.body.appendChild(overlay);
+
+                // Disable the connect button
+                var btn = document.getElementById('btn-connect');
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = 'ライブラリエラー';
+                }
+            }
+        });
+    </script>
+</head>
+
+<body>
+    <!-- ===== ログイン画面 ===== -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="login-logo">
+                <span class="logo-icon">🌐</span>
+                <h1 class="logo-text">MIRAKURU-VERSE</h1>
+                <p class="logo-subtitle">GLOBAL OPEN WORLD</p>
+            </div>
+
+            <div class="login-form">
+                <input type="text" id="nickname-input" class="login-input" placeholder="ニックネームを入力" maxlength="12"
+                    autocomplete="off">
+
+                <div class="security-badge">
+                    <span class="security-icon">🔒</span>
+                    <span>暗号化通信 • セキュアなルームID</span>
+                </div>
+
+                <button id="btn-connect" class="btn-primary">ENTER WORLD</button>
+
+                <p class="login-note">ニックネームは1〜12文字（空白なし）</p>
+            </div>
+
+            <!-- ルーム情報（招待リンクから来た場合表示） -->
+            <div id="room-info" class="room-info hidden">
+                <span class="room-badge">🔗 招待ルームに参加</span>
+                <span id="room-id-display" class="room-id"></span>
+            </div>
+
+            <p class="copyright">© 2025 奥河 董馬（Toma Okugawa）</p>
+        </div>
+    </div>
+
+    <!-- ===== メタバース画面 ===== -->
+    <div id="metaverse-screen" class="screen">
+        <!-- ヘッダー -->
+        <header id="header">
+            <div class="header-left">
+                <span id="room-badge-header" class="badge badge-room">PRIVATE ROOM</span>
+                <span id="nickname-display" class="badge badge-user"></span>
+            </div>
+            <div class="header-right">
+                <button id="btn-python" class="btn-icon" title="Python">🐍</button>
+                <button id="btn-exit" class="btn-icon btn-danger" title="退出">✕</button>
+            </div>
+        </header>
+
+        <!-- 3Dキャンバス -->
+        <div id="canvas-container"></div>
+
+        <!-- タッチコントロール -->
+        <div id="touch-controls" class="touch-controls">
+            <div class="dpad">
+                <button class="dpad-btn dpad-up" data-key="w">▲</button>
+                <div class="dpad-row">
+                    <button class="dpad-btn dpad-left" data-key="a">◀</button>
+                    <button class="dpad-btn dpad-down" data-key="s">▼</button>
+                    <button class="dpad-btn dpad-right" data-key="d">▶</button>
+                </div>
+            </div>
+            <div class="vertical-controls">
+                <button class="vertical-btn" data-key="q">UP</button>
+                <button class="vertical-btn" data-key="e">DN</button>
+            </div>
+        </div>
+
+        <!-- チャット入力 -->
+        <div id="chat-bar" class="chat-bar">
+            <input type="text" id="chat-input" class="chat-input" placeholder="メッセージを入力..." maxlength="100">
+            <button id="chat-send" class="chat-send">送信</button>
+        </div>
+
+        <!-- リアクション・エモートボタン -->
+        <div id="reaction-bar" class="reaction-bar">
+            <button class="reaction-btn" data-reaction="👍">👍</button>
+            <button class="reaction-btn" data-reaction="❤️">❤️</button>
+            <button class="reaction-btn" data-reaction="😂">😂</button>
+            <button class="reaction-btn" data-reaction="🎉">🎉</button>
+            <button class="emote-btn" data-emote="wave">👋</button>
+            <button class="emote-btn" data-emote="spin">🌀</button>
+            <button class="emote-btn" data-emote="spark">✨</button>
+        </div>
+
+        <!-- ヒント -->
+    <div id="hint" class="hint">
+        <span>タッチ / WASD で移動（上:Space 下:Shift）</span>
+    </div>
+    </div>
+
+    <!-- ===== Pythonパネル ===== -->
+    <div id="python-panel" class="python-panel hidden">
+        <div class="python-header">
+            <span class="python-title">🐍 PYTHON CONTROL</span>
+            <button id="python-close" class="btn-icon">✕</button>
+        </div>
+        <div class="python-content">
+            <div class="python-docs">
+                <h4>API</h4>
+                <pre>say("text")      # チャット
+react("👍")      # リアクション
+emote("wave")    # エモート
+magic("snow")    # 魔法エフェクト
+treasure_hint()  # 宝探しヒント</pre>
+            </div>
+            <textarea id="python-code" class="python-code" placeholder="# Pythonコードを入力..."></textarea>
+            <div class="python-actions">
+                <button id="python-run" class="btn-primary">▶ RUN</button>
+                <button id="python-clear" class="btn-secondary">CLEAR</button>
+            </div>
+            <div id="python-output" class="python-output"></div>
+        </div>
+    </div>
+
+    <!-- ===== チャットバブル用オーバーレイ ===== -->
+    <div id="bubble-overlay" class="bubble-overlay"></div>
+
+    <script src="main.js"></script>
+</body>
+
+</html>
