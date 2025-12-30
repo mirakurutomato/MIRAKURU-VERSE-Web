@@ -637,6 +637,15 @@ body {
 }
 
 /* ===== App Embed ===== */
+/* アプリ埋め込みモード: ログイン画面を完全に非表示 */
+body.app-embed #login-screen {
+    display: none !important;
+}
+
+body.app-embed #metaverse-screen {
+    display: flex !important;
+}
+
 body.app-embed #header,
 body.app-embed .hint,
 body.app-embed #btn-python,

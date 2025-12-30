@@ -629,6 +629,9 @@ class MirakuruVerse {
             document.body.classList.add('app-embed');
         }
 
+        // アプリモード: ログイン画面をスキップ（enterRoomメッセージを待機）
+        this.appModeAutoEntered = false;
+
         this.ui = {
             loginScreen: document.getElementById('login-screen'),
             metaverseScreen: document.getElementById('metaverse-screen'),
@@ -1064,6 +1067,13 @@ class MirakuruVerse {
 
         window.addEventListener('message', handler);
         document.addEventListener('message', handler);
+
+        // アプリモード: ログイン画面をスキップしてメタバース画面を表示
+        if (this.appMode && !this.appModeAutoEntered) {
+            this.appModeAutoEntered = true;
+            this.ui.loginScreen.classList.remove('active');
+            this.ui.metaverseScreen.classList.add('active');
+        }
 
         this.postToApp('ready', {
             version: 1,
