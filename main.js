@@ -883,7 +883,8 @@ class MirakuruVerse {
 
     async connectToRoom(options = {}) {
         const rawName = options.name || '';
-        const name = rawName.replace(/\s+/g, '').slice(0, CONFIG.nameLimit);
+        // 空の場合は'Guest'をデフォルトに（アプリモード対応）
+        const name = rawName.replace(/\s+/g, '').slice(0, CONFIG.nameLimit) || 'Guest';
         if (!name) {
             if (!options.silent) {
                 alert('ニックネームを入力してください');
@@ -991,10 +992,12 @@ class MirakuruVerse {
     }
 
     async enterFromApp(payload = {}) {
-        const nickname = payload.nickname || payload.name || '';
+        // Guest フォールバック追加（空ニックネーム対策）
+        const nickname = payload.nickname || payload.name || 'Guest';
         if (this.ui.nicknameInput && nickname) {
             this.ui.nicknameInput.value = nickname;
         }
+        console.log('[enterFromApp] Starting with nickname:', nickname, 'roomId:', payload.roomId);
         await this.connectToRoom({
             name: nickname,
             roomId: payload.roomId || null,
@@ -1024,6 +1027,7 @@ class MirakuruVerse {
         }
         if (!message || typeof message.type !== 'string') return;
 
+        console.log('[handleAppMessage] Received:', message.type, 'nickname:', message.payload?.nickname || '(none)');
         const payload = message.payload || {};
         switch (message.type) {
             case 'enterRoom':
