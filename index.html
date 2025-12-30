@@ -148,12 +148,6 @@
                 <span id="nickname-display" class="badge badge-user"></span>
             </div>
             <div class="header-right">
-                <button id="btn-python" class="btn-icon" title="Python">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path fill="currentColor"
-                            d="M9.4 16.6a1 1 0 01-1.4 0l-4.6-4.6a1 1 0 010-1.4l4.6-4.6a1 1 0 111.4 1.4L5.2 11l4.2 4.2a1 1 0 010 1.4zm5.2 0a1 1 0 01-1.4-1.4L17.4 11l-4.2-4.2a1 1 0 111.4-1.4l4.6 4.6a1 1 0 010 1.4l-4.6 4.6z" />
-                    </svg>
-                </button>
                 <button id="btn-exit" class="btn-icon btn-danger" title="退出">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path fill="currentColor"
@@ -186,44 +180,6 @@
     <div id="hint" class="hint">
         <span>タッチ / WASD で移動（上:Space 下:Shift）</span>
     </div>
-    </div>
-
-    <!-- ===== Pythonパネル ===== -->
-    <div id="python-panel" class="python-panel hidden">
-        <div class="python-header">
-            <span class="python-title">
-                <span class="badge-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" role="img" focusable="false">
-                        <path fill="currentColor"
-                            d="M8.59 7.41a1 1 0 010-1.41l2-2a1 1 0 111.41 1.41L10.41 7l1.59 1.59a1 1 0 01-1.41 1.41l-2-2zm6.82 0l2-2a1 1 0 10-1.41-1.41L14.41 5l1.59 1.59a1 1 0 001.41-1.41zM5 11a1 1 0 011-1h12a1 1 0 110 2H6a1 1 0 01-1-1zm3.59 5.59a1 1 0 010-1.41l2-2a1 1 0 111.41 1.41L10.41 16l1.59 1.59a1 1 0 01-1.41 1.41l-2-2zm6.82 0l2-2a1 1 0 10-1.41-1.41L14.41 16l1.59 1.59a1 1 0 001.41-1.41z" />
-                    </svg>
-                </span>
-                PYTHON CONTROL
-            </span>
-            <button id="python-close" class="btn-icon" title="閉じる">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path fill="currentColor"
-                        d="M6.22 6.22a1 1 0 011.42 0L12 10.59l4.36-4.37a1 1 0 111.42 1.42L13.41 12l4.37 4.36a1 1 0 01-1.42 1.42L12 13.41l-4.36 4.37a1 1 0 01-1.42-1.42L10.59 12 6.22 7.64a1 1 0 010-1.42z" />
-                </svg>
-            </button>
-        </div>
-        <div class="python-content">
-            <div class="python-docs">
-                <h4>API</h4>
-                <pre>say("text")      # チャット
-react("👍")      # リアクション
-emote("wave")    # エモート
-magic("snow")    # 魔法エフェクト
-treasure_hint()  # 宝探しヒント</pre>
-            </div>
-            <textarea id="python-code" class="python-code" placeholder="# Pythonコードを入力..."></textarea>
-            <div class="python-actions">
-                <button id="python-run" class="btn-primary">▶ RUN</button>
-                <button id="python-help" class="btn-secondary">HELP</button>
-                <button id="python-clear" class="btn-secondary">CLEAR</button>
-            </div>
-            <div id="python-output" class="python-output"></div>
-        </div>
     </div>
 
     <!-- ===== チャットバブル用オーバーレイ ===== -->

@@ -116,7 +116,7 @@ class SecurityModule {
 const MQTT_CONFIG = {
     brokerUrl: 'wss://broker.emqx.io:8084/mqtt',
     topicPrefix: 'mirakuruverse/private/',
-    minSendInterval: 30,
+    minSendInterval: 20,
 };
 
 const CryptoBox = {
@@ -951,6 +951,31 @@ class MirakuruVerse {
                 this.postToApp('nicknameSet', { nickname: name });
                 break;
             }
+            case 'python': {
+                const requestId = payload.requestId;
+                const code = String(payload.code ?? '');
+                if (!code.trim()) {
+                    this.postToApp('pythonResult', {
+                        requestId,
+                        output: ['Error: Empty code'],
+                        error: 'Empty code',
+                    });
+                    break;
+                }
+                this.executePythonCode(code)
+                    .then((output) => {
+                        this.postToApp('pythonResult', { requestId, output });
+                    })
+                    .catch((err) => {
+                        const message = err && err.message ? err.message : String(err);
+                        this.postToApp('pythonResult', {
+                            requestId,
+                            output: [`Error: ${message}`],
+                            error: message,
+                        });
+                    });
+                break;
+            }
             case 'ping':
                 this.postToApp('pong', { ts: Date.now() });
                 break;
@@ -1072,15 +1097,22 @@ class MirakuruVerse {
     }
 
     setupPython() {
+        if (!this.ui.pythonPanel || !this.ui.pythonBtn || !this.ui.pythonRun || !this.ui.pythonCode) {
+            return;
+        }
         this.ui.pythonBtn.addEventListener('click', () => {
             this.ui.pythonPanel.classList.toggle('hidden');
         });
-        this.ui.pythonClose.addEventListener('click', () => {
-            this.ui.pythonPanel.classList.add('hidden');
-        });
-        this.ui.pythonClear.addEventListener('click', () => {
-            this.ui.pythonOutput.textContent = '';
-        });
+        if (this.ui.pythonClose) {
+            this.ui.pythonClose.addEventListener('click', () => {
+                this.ui.pythonPanel.classList.add('hidden');
+            });
+        }
+        if (this.ui.pythonClear && this.ui.pythonOutput) {
+            this.ui.pythonClear.addEventListener('click', () => {
+                this.ui.pythonOutput.textContent = '';
+            });
+        }
 
         this.ui.pythonRun.addEventListener('click', () => {
             const code = this.ui.pythonCode.value;
@@ -1127,7 +1159,10 @@ class MirakuruVerse {
             }
         }
 
-        this.ui.pythonOutput.textContent = output.join('\n');
+        if (this.ui.pythonOutput) {
+            this.ui.pythonOutput.textContent = output.join('\n');
+        }
+        return output;
     }
 
     async executeLine(line) {
@@ -1328,7 +1363,7 @@ class MirakuruVerse {
             if (this.keys['q'] || this.keys['space']) targetVertical += 1;
             if (this.keys['e'] || this.keys['shift']) targetVertical -= 1;
 
-            const smooth = 0.25;
+            const smooth = 0.32;
             this.move.forward += (targetForward - this.move.forward) * smooth;
             this.move.turn += (targetTurn - this.move.turn) * smooth;
             this.move.vertical += (targetVertical - this.move.vertical) * smooth;
