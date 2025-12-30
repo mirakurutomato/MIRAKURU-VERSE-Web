@@ -394,16 +394,21 @@ class SecureNetworkManager {
             }
 
             let resolved = false;
-            const finish = () => {
+            const finish = (ok) => {
                 if (resolved) return;
                 resolved = true;
-                resolve();
+                if (!ok && this.client) {
+                    this.client.end();
+                    this.client = null;
+                }
+                resolve(ok);
             };
 
             const timeout = setTimeout(() => {
-                console.warn('MQTT connection timeout - proceeding offline');
-                finish();
-            }, 10000);
+                console.warn('MQTT connection timeout');
+                this.isConnected = false;
+                finish(false);
+            }, 15000);
 
             try {
                 this.client = mqtt.connect(MQTT_CONFIG.brokerUrl, {
@@ -420,9 +425,12 @@ class SecureNetworkManager {
                     this.client.subscribe(topic, (err) => {
                         if (err) {
                             console.error('Subscribe error:', err);
+                            this.isConnected = false;
+                            finish(false);
+                            return;
                         }
                         this.sendJoin();
-                        finish();
+                        finish(true);
                     });
                 });
 
@@ -432,7 +440,8 @@ class SecureNetworkManager {
 
                 this.client.on('error', (err) => {
                     console.error('MQTT error:', err);
-                    finish();
+                    this.isConnected = false;
+                    finish(false);
                 });
 
                 this.client.on('close', () => {
@@ -441,7 +450,8 @@ class SecureNetworkManager {
             } catch (e) {
                 clearTimeout(timeout);
                 console.error('MQTT initialization failed:', e);
-                finish();
+                this.isConnected = false;
+                finish(false);
             }
         });
     }
@@ -904,7 +914,13 @@ class MirakuruVerse {
                 this.isHost = true;
             }
 
-            await this.network.connect(this.myName);
+            const connected = await this.network.connect(this.myName);
+            if (!connected) {
+                throw new Error('MQTT connection failed');
+            }
+            this.network.announcePresence(true);
+            setTimeout(() => this.network.announcePresence(true), 1500);
+            setTimeout(() => this.network.announcePresence(true), 3000);
             if (this.isHost) {
                 console.log('Invite URL:', this.network.generateInviteUrl());
             }
