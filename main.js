@@ -613,6 +613,10 @@ class MirakuruVerse {
         this.inviteInfo = parseInviteFromUrl();
         this.isHost = false;
         this.appBridgeAttached = false;
+        this.isEmbedded = new URLSearchParams(window.location.search).get('app') === '1';
+        if (this.isEmbedded) {
+            document.body.classList.add('app-embed');
+        }
 
         this.ui = {
             loginScreen: document.getElementById('login-screen'),
@@ -802,6 +806,27 @@ class MirakuruVerse {
         this.ui.roomIdDisplay.textContent = `Room: ${shortId}`;
     }
 
+    resetRoomState() {
+        if (this.myAvatar) {
+            this.scene.remove(this.myAvatar);
+            this.myAvatar = null;
+        }
+
+        Object.values(this.remotePlayers).forEach((player) => {
+            if (player && player.mesh) {
+                this.scene.remove(player.mesh);
+            }
+        });
+        this.remotePlayers = {};
+
+        this.bubbles.forEach((bubble) => {
+            if (bubble && bubble.bubble) {
+                bubble.bubble.remove();
+            }
+        });
+        this.bubbles = [];
+    }
+
     postToApp(type, payload = {}) {
         if (!window.ReactNativeWebView || typeof window.ReactNativeWebView.postMessage !== 'function') {
             return;
@@ -833,6 +858,16 @@ class MirakuruVerse {
             this.postToApp('error', { code: 'INVALID_NAME', message: 'ニックネームを入力してください' });
             return false;
         }
+
+        const explicitRoomId = options.roomId || null;
+        const explicitHostId = options.hostId || '';
+        const hostMode = Boolean(options.isHost);
+        const expiresAt = options.expiresAt || (this.inviteInfo ? this.inviteInfo.expiresAt : Date.now() + 86400000);
+
+        if (options.force && this.network.isConnected) {
+            this.network.disconnect();
+            this.resetRoomState();
+        }
         if (this.network.isConnected) {
             this.postToApp('error', { code: 'ALREADY_CONNECTED', message: 'すでに接続済みです' });
             return false;
@@ -843,10 +878,6 @@ class MirakuruVerse {
         this.ui.connectButton.textContent = '接続中...';
 
         try {
-            const explicitRoomId = options.roomId || null;
-            const explicitHostId = options.hostId || '';
-            const hostMode = Boolean(options.isHost);
-            const expiresAt = options.expiresAt || (this.inviteInfo ? this.inviteInfo.expiresAt : Date.now() + 86400000);
 
             if (explicitRoomId) {
                 this.inviteInfo = {
@@ -913,6 +944,7 @@ class MirakuruVerse {
             hostId: payload.hostId || '',
             isHost: Boolean(payload.isHost),
             expiresAt: payload.expiresAt,
+            force: Boolean(payload.force),
             silent: true,
         });
     }
