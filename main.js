@@ -350,6 +350,7 @@ class SecureNetworkManager {
         this.encryptionKey = null;
         this.messageCounter = 0;
         this.receivedCounters = new Map();
+        this.replayWindow = 64;
         this.lastSent = 0;
         this.lastAnnounce = 0;
         this.isConnected = false;
@@ -507,9 +508,23 @@ class SecureNetworkManager {
     }
 
     isReplay(sender, counter) {
-        const last = this.receivedCounters.get(sender);
-        if (last !== undefined && counter <= last) return true;
-        this.receivedCounters.set(sender, counter);
+        const state = this.receivedCounters.get(sender);
+        if (!state) {
+            this.receivedCounters.set(sender, { last: counter, seen: new Set([counter]) });
+            return false;
+        }
+        if (state.seen.has(counter)) return true;
+        if (counter < state.last - this.replayWindow) return true;
+        if (counter > state.last) {
+            state.last = counter;
+        }
+        state.seen.add(counter);
+        const threshold = state.last - this.replayWindow;
+        for (const value of state.seen) {
+            if (value < threshold) {
+                state.seen.delete(value);
+            }
+        }
         return false;
     }
 
@@ -596,6 +611,8 @@ class MirakuruVerse {
         this.move = { forward: 0, turn: 0, vertical: 0 };
         this.bubbles = [];
         this.inviteInfo = parseInviteFromUrl();
+        this.isHost = false;
+        this.appBridgeAttached = false;
 
         this.ui = {
             loginScreen: document.getElementById('login-screen'),
@@ -633,16 +650,11 @@ class MirakuruVerse {
         this.setupChat();
         this.setupPython();
         this.setupHint();
+        this.setupAppBridge();
         this.animate();
 
         // 招待情報表示
-        if (this.inviteInfo) {
-            this.ui.roomInfo.classList.remove('hidden');
-            const shortId = this.inviteInfo.roomId.length > 20
-                ? this.inviteInfo.roomId.slice(0, 10) + '...' + this.inviteInfo.roomId.slice(-6)
-                : this.inviteInfo.roomId;
-            this.ui.roomIdDisplay.textContent = `Room: ${shortId}`;
-        }
+        this.updateInviteInfoUI();
     }
 
     initThree() {
@@ -767,53 +779,200 @@ class MirakuruVerse {
                 return;
             }
 
-            this.myName = name;
-            this.ui.connectButton.disabled = true;
-            this.ui.connectButton.textContent = '接続中...';
-
-            try {
-                // ルーム設定
-                if (this.inviteInfo) {
-                    // 招待から参加
-                    await this.network.setRoom(this.inviteInfo.roomId, false, this.inviteInfo.hostId);
-                    this.ui.roomBadge.textContent = 'INVITED ROOM';
-                    this.ui.roomBadge.classList.add('active');
-                } else {
-                    // 新規ルーム作成（ホスト）
-                    const roomId = this.network.generateRoomId();
-                    await this.network.setRoom(roomId, true);
-                    this.ui.roomBadge.textContent = 'HOST';
-                    this.ui.roomBadge.classList.add('active');
-                }
-
-                // 接続
-                await this.network.connect(this.myName);
-                if (!this.inviteInfo) {
-                    // 招待URLをコンソールに表示（デバッグ用）
-                    console.log('Invite URL:', this.network.generateInviteUrl());
-                }
-
-                // アバター作成
-                this.myAvatar = this.createAvatarMesh(this.myColorIdx);
-                this.myAvatar.position.set(randRange(-5, 5), 0, randRange(-5, 5));
-                this.scene.add(this.myAvatar);
-
-                // 画面切り替え
-                this.ui.loginScreen.classList.remove('active');
-                this.ui.metaverseScreen.classList.add('active');
-                this.ui.nicknameDisplay.textContent = this.myName;
-
-            } catch (e) {
-                console.error('Connection failed:', e);
-                this.ui.connectButton.disabled = false;
-                this.ui.connectButton.textContent = 'ENTER WORLD';
-                alert('接続に失敗しました');
-            }
+            await this.connectToRoom({ name });
         });
 
         this.ui.exitBtn.addEventListener('click', () => {
             this.network.disconnect();
             location.reload();
+        });
+    }
+
+    updateInviteInfoUI() {
+        if (!this.ui.roomInfo || !this.ui.roomIdDisplay) return;
+        if (!this.inviteInfo) {
+            this.ui.roomInfo.classList.add('hidden');
+            return;
+        }
+
+        this.ui.roomInfo.classList.remove('hidden');
+        const shortId = this.inviteInfo.roomId.length > 20
+            ? this.inviteInfo.roomId.slice(0, 10) + '...' + this.inviteInfo.roomId.slice(-6)
+            : this.inviteInfo.roomId;
+        this.ui.roomIdDisplay.textContent = `Room: ${shortId}`;
+    }
+
+    postToApp(type, payload = {}) {
+        if (!window.ReactNativeWebView || typeof window.ReactNativeWebView.postMessage !== 'function') {
+            return;
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type, payload }));
+    }
+
+    notifyJoined() {
+        const roomId = this.network.roomId || (this.inviteInfo ? this.inviteInfo.roomId : null);
+        if (!roomId) return;
+        const payload = {
+            roomId,
+            hostId: this.network.myId || (this.inviteInfo ? this.inviteInfo.hostId : ''),
+            isHost: this.isHost,
+        };
+        if (this.isHost) {
+            payload.inviteUrl = this.network.generateInviteUrl();
+        }
+        this.postToApp('joined', payload);
+    }
+
+    async connectToRoom(options = {}) {
+        const rawName = options.name || '';
+        const name = rawName.replace(/\s+/g, '').slice(0, CONFIG.nameLimit);
+        if (!name) {
+            if (!options.silent) {
+                alert('ニックネームを入力してください');
+            }
+            this.postToApp('error', { code: 'INVALID_NAME', message: 'ニックネームを入力してください' });
+            return false;
+        }
+        if (this.network.isConnected) {
+            this.postToApp('error', { code: 'ALREADY_CONNECTED', message: 'すでに接続済みです' });
+            return false;
+        }
+
+        this.myName = name;
+        this.ui.connectButton.disabled = true;
+        this.ui.connectButton.textContent = '接続中...';
+
+        try {
+            const explicitRoomId = options.roomId || null;
+            const explicitHostId = options.hostId || '';
+            const hostMode = Boolean(options.isHost);
+            const expiresAt = options.expiresAt || (this.inviteInfo ? this.inviteInfo.expiresAt : Date.now() + 86400000);
+
+            if (explicitRoomId) {
+                this.inviteInfo = {
+                    roomId: explicitRoomId,
+                    hostId: explicitHostId,
+                    expiresAt,
+                    isHost: hostMode,
+                };
+                this.updateInviteInfoUI();
+                await this.network.setRoom(explicitRoomId, hostMode, explicitHostId);
+                this.ui.roomBadge.textContent = hostMode ? 'HOST' : 'INVITED ROOM';
+                this.ui.roomBadge.classList.add('active');
+                this.isHost = hostMode;
+            } else if (this.inviteInfo) {
+                await this.network.setRoom(this.inviteInfo.roomId, false, this.inviteInfo.hostId);
+                this.ui.roomBadge.textContent = 'INVITED ROOM';
+                this.ui.roomBadge.classList.add('active');
+                this.isHost = false;
+            } else {
+                const roomId = this.network.generateRoomId();
+                await this.network.setRoom(roomId, true);
+                this.ui.roomBadge.textContent = 'HOST';
+                this.ui.roomBadge.classList.add('active');
+                this.isHost = true;
+            }
+
+            await this.network.connect(this.myName);
+            if (this.isHost) {
+                console.log('Invite URL:', this.network.generateInviteUrl());
+            }
+
+            // アバター作成
+            this.myAvatar = this.createAvatarMesh(this.myColorIdx);
+            this.myAvatar.position.set(randRange(-5, 5), 0, randRange(-5, 5));
+            this.scene.add(this.myAvatar);
+
+            // 画面切り替え
+            this.ui.loginScreen.classList.remove('active');
+            this.ui.metaverseScreen.classList.add('active');
+            this.ui.nicknameDisplay.textContent = this.myName;
+
+            this.notifyJoined();
+            return true;
+        } catch (e) {
+            console.error('Connection failed:', e);
+            this.ui.connectButton.disabled = false;
+            this.ui.connectButton.textContent = 'ENTER WORLD';
+            if (!options.silent) {
+                alert('接続に失敗しました');
+            }
+            this.postToApp('error', { code: 'CONNECT_FAILED', message: e && e.message ? e.message : '接続に失敗しました' });
+            return false;
+        }
+    }
+
+    async enterFromApp(payload = {}) {
+        const nickname = payload.nickname || payload.name || '';
+        if (this.ui.nicknameInput && nickname) {
+            this.ui.nicknameInput.value = nickname;
+        }
+        await this.connectToRoom({
+            name: nickname,
+            roomId: payload.roomId || null,
+            hostId: payload.hostId || '',
+            isHost: Boolean(payload.isHost),
+            expiresAt: payload.expiresAt,
+            silent: true,
+        });
+    }
+
+    leaveFromApp() {
+        this.network.disconnect();
+        this.postToApp('left', {});
+        location.reload();
+    }
+
+    handleAppMessage(raw) {
+        if (!raw) return;
+        let message = raw;
+        if (typeof raw === 'string') {
+            try {
+                message = JSON.parse(raw);
+            } catch (e) {
+                return;
+            }
+        }
+        if (!message || typeof message.type !== 'string') return;
+
+        const payload = message.payload || {};
+        switch (message.type) {
+            case 'enterRoom':
+                this.enterFromApp(payload);
+                break;
+            case 'leave':
+                this.leaveFromApp();
+                break;
+            case 'setNickname': {
+                const name = (payload.nickname || '').replace(/\s+/g, '').slice(0, CONFIG.nameLimit);
+                if (this.ui.nicknameInput && name) {
+                    this.ui.nicknameInput.value = name;
+                }
+                this.postToApp('nicknameSet', { nickname: name });
+                break;
+            }
+            case 'ping':
+                this.postToApp('pong', { ts: Date.now() });
+                break;
+            default:
+                break;
+        }
+    }
+
+    setupAppBridge() {
+        if (this.appBridgeAttached) return;
+        this.appBridgeAttached = true;
+
+        const handler = (event) => {
+            this.handleAppMessage(event.data);
+        };
+
+        window.addEventListener('message', handler);
+        document.addEventListener('message', handler);
+
+        this.postToApp('ready', {
+            version: 1,
+            hasInvite: Boolean(this.inviteInfo),
         });
     }
 
