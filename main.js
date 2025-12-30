@@ -909,8 +909,10 @@ class MirakuruVerse {
         }
 
         this.myName = name;
-        this.ui.connectButton.disabled = true;
-        this.ui.connectButton.textContent = '接続中...';
+        if (this.ui.connectButton) {
+            this.ui.connectButton.disabled = true;
+            this.ui.connectButton.textContent = '接続中...';
+        }
 
         try {
 
@@ -923,19 +925,25 @@ class MirakuruVerse {
                 };
                 this.updateInviteInfoUI();
                 await this.network.setRoom(explicitRoomId, hostMode, explicitHostId);
-                this.ui.roomBadge.textContent = hostMode ? 'HOST' : 'INVITED ROOM';
-                this.ui.roomBadge.classList.add('active');
+                if (this.ui.roomBadge) {
+                    this.ui.roomBadge.textContent = hostMode ? 'HOST' : 'INVITED ROOM';
+                    this.ui.roomBadge.classList.add('active');
+                }
                 this.isHost = hostMode;
             } else if (this.inviteInfo) {
                 await this.network.setRoom(this.inviteInfo.roomId, false, this.inviteInfo.hostId);
-                this.ui.roomBadge.textContent = 'INVITED ROOM';
-                this.ui.roomBadge.classList.add('active');
+                if (this.ui.roomBadge) {
+                    this.ui.roomBadge.textContent = 'INVITED ROOM';
+                    this.ui.roomBadge.classList.add('active');
+                }
                 this.isHost = false;
             } else {
                 const roomId = this.network.generateRoomId();
                 await this.network.setRoom(roomId, true);
-                this.ui.roomBadge.textContent = 'HOST';
-                this.ui.roomBadge.classList.add('active');
+                if (this.ui.roomBadge) {
+                    this.ui.roomBadge.textContent = 'HOST';
+                    this.ui.roomBadge.classList.add('active');
+                }
                 this.isHost = true;
             }
 
@@ -956,16 +964,24 @@ class MirakuruVerse {
             this.scene.add(this.myAvatar);
 
             // 画面切り替え
-            this.ui.loginScreen.classList.remove('active');
-            this.ui.metaverseScreen.classList.add('active');
-            this.ui.nicknameDisplay.textContent = this.myName;
+            if (this.ui.loginScreen) {
+                this.ui.loginScreen.classList.remove('active');
+            }
+            if (this.ui.metaverseScreen) {
+                this.ui.metaverseScreen.classList.add('active');
+            }
+            if (this.ui.nicknameDisplay) {
+                this.ui.nicknameDisplay.textContent = this.myName;
+            }
 
             this.notifyJoined();
             return true;
         } catch (e) {
             console.error('Connection failed:', e);
-            this.ui.connectButton.disabled = false;
-            this.ui.connectButton.textContent = 'ENTER WORLD';
+            if (this.ui.connectButton) {
+                this.ui.connectButton.disabled = false;
+                this.ui.connectButton.textContent = 'ENTER WORLD';
+            }
             if (!options.silent) {
                 alert('接続に失敗しました');
             }
