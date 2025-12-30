@@ -1118,6 +1118,12 @@ class MirakuruVerse {
 
     setupInputs() {
         const applyKey = (e, isDown) => {
+            // 入力フォームでのタイピング中は移動イベントを無視
+            const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+            if (activeTag === 'input' || activeTag === 'textarea') {
+                return;
+            }
+
             const key = e.key.toLowerCase();
             if (e.code === 'Space' || key === ' ') {
                 this.keys.space = isDown;
