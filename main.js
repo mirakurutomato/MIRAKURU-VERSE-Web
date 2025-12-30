@@ -861,8 +861,10 @@ class MirakuruVerse {
 
     postToApp(type, payload = {}) {
         if (!window.ReactNativeWebView || typeof window.ReactNativeWebView.postMessage !== 'function') {
+            console.log('[postToApp] ReactNativeWebView not available, cannot send:', type);
             return;
         }
+        console.log('[postToApp] Sending to app:', type, payload);
         window.ReactNativeWebView.postMessage(JSON.stringify({ type, payload }));
     }
 
@@ -1091,14 +1093,27 @@ class MirakuruVerse {
         // アプリモード: ログイン画面をスキップしてメタバース画面を表示
         if (this.appMode && !this.appModeAutoEntered) {
             this.appModeAutoEntered = true;
-            this.ui.loginScreen.classList.remove('active');
-            this.ui.metaverseScreen.classList.add('active');
+            if (this.ui.loginScreen) {
+                this.ui.loginScreen.classList.remove('active');
+            }
+            if (this.ui.metaverseScreen) {
+                this.ui.metaverseScreen.classList.add('active');
+            }
         }
 
-        this.postToApp('ready', {
-            version: 1,
-            hasInvite: Boolean(this.inviteInfo),
-        });
+        // ready メッセージを複数回送信（ReactNativeWebViewの準備待ち対策）
+        const sendReady = () => {
+            console.log('[setupAppBridge] Sending ready message, ReactNativeWebView available:', !!window.ReactNativeWebView);
+            this.postToApp('ready', {
+                version: 1,
+                hasInvite: Boolean(this.inviteInfo),
+            });
+        };
+
+        sendReady();
+        setTimeout(sendReady, 100);
+        setTimeout(sendReady, 500);
+        setTimeout(sendReady, 1000);
     }
 
     setupInputs() {
