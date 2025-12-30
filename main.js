@@ -623,6 +623,7 @@ class MirakuruVerse {
         this.inviteInfo = parseInviteFromUrl();
         this.isHost = false;
         this.appBridgeAttached = false;
+        this.appMode = new URLSearchParams(window.location.search).get('app') === '1';
         this.isEmbedded = new URLSearchParams(window.location.search).get('app') === '1';
         if (this.isEmbedded) {
             document.body.classList.add('app-embed');
@@ -658,6 +659,7 @@ class MirakuruVerse {
         this.magicSystem = new MagicSystem(this.scene);
         this.treasureSystem = new TreasureSystem(this);
         this.setupLogin();
+        this.updateAppModeUI();
         this.setupInputs();
         this.setupViewControls();
         this.setupTouchControls();
@@ -772,6 +774,18 @@ class MirakuruVerse {
     }
 
     async setupLogin() {
+        if (this.appMode) {
+            if (this.ui.nicknameInput) {
+                this.ui.nicknameInput.disabled = true;
+                this.ui.nicknameInput.placeholder = 'APP CONTROLLED';
+            }
+            if (this.ui.connectButton) {
+                this.ui.connectButton.disabled = true;
+                this.ui.connectButton.textContent = 'APP CONTROLLED';
+            }
+            return;
+        }
+
         // ニックネーム入力時にボタン有効化
         this.ui.nicknameInput.addEventListener('input', () => {
             const name = this.ui.nicknameInput.value.replace(/\s+/g, '');
@@ -816,6 +830,11 @@ class MirakuruVerse {
         this.ui.roomIdDisplay.textContent = `Room: ${shortId}`;
     }
 
+    updateAppModeUI() {
+        if (!this.appMode || !this.ui.loginScreen) return;
+        this.ui.loginScreen.classList.add('app-mode');
+    }
+
     resetRoomState() {
         if (this.myAvatar) {
             this.scene.remove(this.myAvatar);
@@ -852,6 +871,7 @@ class MirakuruVerse {
             hostId: this.network.myId || (this.inviteInfo ? this.inviteInfo.hostId : ''),
             isHost: this.isHost,
         };
+        payload.expiresAt = this.inviteInfo?.expiresAt || Date.now() + 24 * 60 * 60 * 1000;
         if (this.isHost) {
             payload.inviteUrl = this.network.generateInviteUrl();
         }
@@ -873,14 +893,16 @@ class MirakuruVerse {
         const explicitHostId = options.hostId || '';
         const hostMode = Boolean(options.isHost);
         const expiresAt = options.expiresAt || (this.inviteInfo ? this.inviteInfo.expiresAt : Date.now() + 86400000);
+        const force = Boolean(options.force);
 
-        if (options.force && this.network.isConnected) {
-            this.network.disconnect();
-            this.resetRoomState();
-        }
         if (this.network.isConnected) {
-            this.postToApp('error', { code: 'ALREADY_CONNECTED', message: 'すでに接続済みです' });
-            return false;
+            if (force) {
+                this.network.disconnect();
+                this.resetRoomState();
+            } else {
+                this.postToApp('error', { code: 'ALREADY_CONNECTED', message: 'すでに接続済みです' });
+                return false;
+            }
         }
 
         this.myName = name;
